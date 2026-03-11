@@ -13,8 +13,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Sync events from the past 30 minutes (overlapping window = nothing missed)
-    const since = new Date(Date.now() - 30 * 60 * 1000);
+    // Allow ?since= override for backfills (ISO string or ms timestamp)
+    const sinceParam = req.nextUrl.searchParams.get('since');
+    const since = sinceParam
+      ? new Date(isNaN(Number(sinceParam)) ? sinceParam : Number(sinceParam))
+      : new Date(Date.now() - 30 * 60 * 1000);
     const result = await syncCalendlyToCliked(since, true);
 
     console.log('Cron sync complete:', result);
