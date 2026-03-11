@@ -133,11 +133,12 @@ export async function createClinkedEvent(
   payload: { name: string; startTime: string; endTime: string; description: string; location: string }
 ) {
   const body = {
-    name: payload.name,
-    startDate: new Date(payload.startTime).getTime(),
-    endDate: new Date(payload.endTime).getTime(),
+    name: payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting',
+    friendlyName: payload.name,
+    startDate: new Date(payload.startTime).toISOString(),
+    endDate: new Date(payload.endTime).toISOString(),
     description: payload.description,
-    location: payload.location,
+    location: payload.location || undefined,
     allDay: false,
   };
 
