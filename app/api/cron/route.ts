@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const since = sinceParam
       ? new Date(isNaN(Number(sinceParam)) ? sinceParam : Number(sinceParam))
       : new Date(Date.now() - 30 * 60 * 1000);
-    const result = await syncCalendlyToCliked(since, true);
+    const result = await syncCalendlyToCliked(since, false);
 
     console.log('Cron sync complete:', result);
     return NextResponse.json({ ok: true, ...result });

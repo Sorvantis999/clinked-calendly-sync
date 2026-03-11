@@ -4,7 +4,7 @@ import {
   getClinkedToken,
   getAllGroups,
   findGroupForEmail,
-  createGroupForInvitee,
+  getPendingInviteMap,
   getExistingClinkedEvents,
   createClinkedEvent,
 } from '@/lib/sync';
@@ -54,9 +54,14 @@ export async function POST(req: NextRequest) {
   try {
     const token = await getClinkedToken();
     const groups = await getAllGroups(token);
+    const pendingInvites = await getPendingInviteMap(token);
+
     let groupId = await findGroupForEmail(groups, email);
+    if (!groupId) groupId = pendingInvites.get(email.toLowerCase()) ?? null;
+
     if (!groupId) {
-      groupId = await createGroupForInvitee(token, name, email);
+      console.log(`No Clinked group for ${email} — skipping (no auto-create)`);
+      return NextResponse.json({ ok: true, skipped: true, reason: 'no_group' });
     }
     const existing = await getExistingClinkedEvents(token, groupId);
     const startMs = new Date(startTime).getTime();
