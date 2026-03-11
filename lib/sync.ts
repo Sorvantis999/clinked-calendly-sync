@@ -43,6 +43,35 @@ export async function findGroupForEmail(groups: any[], email: string): Promise<n
   return null;
 }
 
+// Returns a map of email (lowercase) → groupId for all pending (unaccepted) invites
+export async function getPendingInviteMap(token: string): Promise<Map<string, number>> {
+  const res = await fetch(
+    `https://api.clinked.com/v3/accounts/${CLINKED_ACCOUNT_ID}/invites?pageSize=100`,
+    { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+  );
+  const map = new Map<string, number>();
+  if (!res.ok) return map;
+
+  const data = await res.json();
+  for (const item of data.items || []) {
+    const req = item.request;
+    if (!req || req.status !== 'NONE') continue; // NONE = pending, not yet accepted/declined
+    const email = req.targetName?.toLowerCase();
+    if (!email) continue;
+    try {
+      const params = JSON.parse(req.parameters || '{}');
+      const groupIds = Object.keys(params.groups || {});
+      if (groupIds.length > 0) {
+        map.set(email, parseInt(groupIds[0], 10));
+      }
+    } catch {
+      // malformed parameters, skip
+    }
+  }
+  console.log(`Pending invite map: ${map.size} entries`);
+  return map;
+}
+
 export async function createGroupForInvitee(
   token: string,
   name: string,
@@ -176,6 +205,7 @@ export async function syncCalendlyToCliked(
 
   const token = await getClinkedToken();
   const groups = await getAllGroups(token);
+  const pendingInvites = await getPendingInviteMap(token);
 
   // Fetch Calendly events from the given window
   const events = await getCalendlyEvents(since.toISOString());
@@ -198,6 +228,14 @@ export async function syncCalendlyToCliked(
 
       try {
         let groupId = await findGroupForEmail(groups, email);
+
+        // Fallback: check pending (unaccepted) invites
+        if (!groupId) {
+          groupId = pendingInvites.get(email.toLowerCase()) ?? null;
+          if (groupId) {
+            console.log(`Found ${email} via pending invite → group ${groupId}`);
+          }
+        }
 
         if (!groupId) {
           if (!autoCreateGroups) {
