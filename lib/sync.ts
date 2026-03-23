@@ -29,18 +29,45 @@ export async function getAllGroups(token: string): Promise<any[]> {
     `https://api.clinked.com/v3/accounts/${CLINKED_ACCOUNT_ID}/groups?pageSize=100`,
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
   );
+  if (!res.ok) {
+    console.error(`getAllGroups failed: ${res.status} ${await res.text()}`);
+    return [];
+  }
   const data = await res.json();
   return data.items || [];
 }
 
-export async function findGroupForEmail(groups: any[], email: string): Promise<number | null> {
+// Fetch members for a single group — the members endpoint includes email, the groups list does not
+async function getGroupMembers(token: string, groupId: number): Promise<any[]> {
+  try {
+    const res = await fetch(
+      `https://api.clinked.com/v3/groups/${groupId}/members?pageSize=100`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.items || [];
+  } catch {
+    return [];
+  }
+}
+
+// Build a map of email (lowercase) → groupId by fetching members for every group.
+// NOTE: The /groups list endpoint does NOT include email in memberDetails.user —
+// email is only available via /groups/{id}/members. This is the correct lookup path.
+export async function buildEmailToGroupMap(token: string, groups: any[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
   for (const group of groups) {
-    const members: any[] = group.memberDetails || [];
-    if (members.some((m: any) => m.user?.email?.toLowerCase() === email.toLowerCase())) {
-      return group.id;
+    const members = await getGroupMembers(token, group.id);
+    for (const m of members) {
+      const email = m.user?.email?.toLowerCase();
+      if (email && !map.has(email)) {
+        map.set(email, group.id);
+      }
     }
   }
-  return null;
+  console.log(`Email→group map: ${map.size} entries across ${groups.length} groups`);
+  return map;
 }
 
 // Returns a map of email (lowercase) → groupId for all pending (unaccepted) invites
@@ -50,7 +77,10 @@ export async function getPendingInviteMap(token: string): Promise<Map<string, nu
     { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
   );
   const map = new Map<string, number>();
-  if (!res.ok) return map;
+  if (!res.ok) {
+    console.error(`getPendingInviteMap failed: ${res.status}`);
+    return map;
+  }
 
   const data = await res.json();
   for (const item of data.items || []) {
@@ -206,6 +236,12 @@ export async function syncCalendlyToCliked(
 
   const token = await getClinkedToken();
   const groups = await getAllGroups(token);
+
+  // Build email→group map using the members endpoint (which includes email)
+  // The groups list endpoint does NOT include email in memberDetails — this is the correct path
+  const emailToGroup = await buildEmailToGroupMap(token, groups);
+
+  // Also check pending (unaccepted) invites as a fallback
   const pendingInvites = await getPendingInviteMap(token);
 
   // Fetch Calendly events from the given window
@@ -228,9 +264,10 @@ export async function syncCalendlyToCliked(
       if (!email || !startTime) continue;
 
       try {
-        let groupId = await findGroupForEmail(groups, email);
+        // Primary lookup: members endpoint (includes email)
+        let groupId = emailToGroup.get(email.toLowerCase()) ?? null;
 
-        // Fallback: check pending (unaccepted) invites
+        // Fallback: pending invites (for clients who haven't accepted yet)
         if (!groupId) {
           groupId = pendingInvites.get(email.toLowerCase()) ?? null;
           if (groupId) {
@@ -246,7 +283,8 @@ export async function syncCalendlyToCliked(
           }
           // Auto-create group for new invitee
           groupId = await createGroupForInvitee(token, name, email);
-          // Add to local groups list so subsequent iterations find it
+          // Add to local map so subsequent iterations find it
+          emailToGroup.set(email.toLowerCase(), groupId);
           groups.push({ id: groupId, memberDetails: [{ user: { email } }] });
           result.newGroups++;
         }
@@ -256,7 +294,7 @@ export async function syncCalendlyToCliked(
         const startMs = new Date(startTime).getTime();
         const duplicate = existing.some(
           (e: any) =>
-            e.name === eventName &&
+            e.friendlyName === eventName &&
             Math.abs((e.startDate || 0) - startMs) < 60000 // within 1 min
         );
 
