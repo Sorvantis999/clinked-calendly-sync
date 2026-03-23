@@ -162,8 +162,11 @@ export async function createClinkedEvent(
   groupId: number,
   payload: { name: string; startTime: string; endTime: string; description: string; location: string }
 ) {
+  // Clinked `name` is a unique slug per group — append start-time epoch to avoid collisions
+  // when the same event type is booked multiple times (e.g., two "Concierge Client Sessions")
+  const startEpoch = new Date(payload.startTime).getTime();
   const body = {
-    name: payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting',
+    name: (payload.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'meeting') + '-' + startEpoch,
     friendlyName: payload.name,
     startDate: new Date(payload.startTime).toISOString(),
     endDate: new Date(payload.endTime).toISOString(),
