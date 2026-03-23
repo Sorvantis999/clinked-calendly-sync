@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import {
   getClinkedToken,
   getAllGroups,
-  findGroupForEmail,
+  buildEmailToGroupMap,
   getPendingInviteMap,
   getExistingClinkedEvents,
   createClinkedEvent,
@@ -54,9 +54,12 @@ export async function POST(req: NextRequest) {
   try {
     const token = await getClinkedToken();
     const groups = await getAllGroups(token);
+
+    // Use members endpoint (which includes email) to build the lookup map
+    const emailToGroup = await buildEmailToGroupMap(token, groups);
     const pendingInvites = await getPendingInviteMap(token);
 
-    let groupId = await findGroupForEmail(groups, email);
+    let groupId = emailToGroup.get(email.toLowerCase()) ?? null;
     if (!groupId) groupId = pendingInvites.get(email.toLowerCase()) ?? null;
 
     if (!groupId) {
@@ -66,7 +69,7 @@ export async function POST(req: NextRequest) {
     const existing = await getExistingClinkedEvents(token, groupId);
     const startMs = new Date(startTime).getTime();
     const duplicate = existing.some(
-      (e: any) => e.name === eventName && Math.abs((e.startDate || 0) - startMs) < 60000
+      (e: any) => e.friendlyName === eventName && Math.abs((e.startDate || 0) - startMs) < 60000
     );
     if (duplicate) return NextResponse.json({ ok: true, message: 'Duplicate, skipped' });
     const description = `Booked via Calendly\nClient: ${name} (${email})${location ? `\nLocation: ${location}` : ''}`;
