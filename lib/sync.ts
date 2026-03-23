@@ -295,11 +295,16 @@ export async function syncCalendlyToCliked(
         // Deduplicate: check if an event with same name and start time already exists
         const existing = await getExistingClinkedEvents(token, groupId);
         const startMs = new Date(startTime).getTime();
-        const duplicate = existing.some(
-          (e: any) =>
-            e.friendlyName === eventName &&
-            Math.abs((e.startDate || 0) - startMs) < 60000 // within 1 min
-        );
+        const duplicate = existing.some((e: any) => {
+          if (e.friendlyName !== eventName) return false;
+          // Clinked returns startDate with IANA zone suffix e.g. "2026-03-09T16:00Z[UTC]"
+          // or "2026-03-19T13:00-05:00[America/Chicago]" — strip the [...] before parsing
+          const rawDate = typeof e.startDate === 'string'
+            ? e.startDate.replace(/\[.*\]$/, '')
+            : null;
+          const existingMs = rawDate ? new Date(rawDate).getTime() : (e.startDate || 0);
+          return Math.abs(existingMs - startMs) < 60000; // within 1 min
+        });
 
         if (duplicate) {
           console.log(`Duplicate event "${eventName}" for ${email}, skipping`);
